@@ -1,0 +1,53 @@
+# ============================================================
+# Field Sales System — gitignore
+# ============================================================
+
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+.next/
+out/
+.vite/
+
+# Env files (NEVER commit credentials)
+.env
+.env.local
+.env.*.local
+backend/.env
+admin-dashboard/.env
+agent-pwa/.env
+
+# Allow examples
+!.env.example
+!**/.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+.claude/
+
+# Coverage / tests
+coverage/
+
+# Uploads (user-generated)
+uploads/
+backend/uploads/
+
+# Build artifacts
+*.tsbuildinfo
+.turbo/
+
+# Test report
+test-suite.sh

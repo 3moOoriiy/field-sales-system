@@ -1,0 +1,89 @@
+# ============================================================
+# Render.com blueprint — deploys backend + admin + agent PWA
+# ============================================================
+# Usage:
+#   1. Push this repo to GitHub
+#   2. On Render: New + → Blueprint → connect this repo
+#   3. Set DATABASE_URL secret on the backend service (use your Neon URL)
+#   4. Set CORS_ORIGINS to include the static site URLs once they're created
+# ============================================================
+
+services:
+  # ---------- Backend API (Docker) ----------
+  - type: web
+    name: field-sales-api
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: Dockerfile
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: DATABASE_URL
+        sync: false   # Set manually in Render dashboard (your Neon URL)
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: JWT_ACCESS_EXPIRES
+        value: 15m
+      - key: JWT_REFRESH_EXPIRES
+        value: 7d
+      - key: BCRYPT_ROUNDS
+        value: 12
+      - key: LOGIN_MAX_ATTEMPTS
+        value: 5
+      - key: LOGIN_LOCK_MINUTES
+        value: 15
+      - key: RATE_LIMIT_PER_MINUTE
+        value: 100
+      - key: UPLOAD_DIR
+        value: /app/uploads
+      - key: MAX_UPLOAD_MB
+        value: 10
+      # CORS — set after the static sites are deployed and you know the URLs.
+      # Render will use the values defined here as defaults; override in dashboard.
+      - key: CORS_ORIGINS
+        value: https://field-sales-admin.onrender.com,https://field-sales-pwa.onrender.com
+
+  # ---------- Admin Dashboard (Static Site, free, always-on) ----------
+  - type: web
+    name: field-sales-admin
+    runtime: static
+    rootDir: admin-dashboard
+    plan: free
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    autoDeploy: true
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        value: https://field-sales-api.onrender.com
+
+  # ---------- Agent PWA (Static Site, free, always-on) ----------
+  - type: web
+    name: field-sales-pwa
+    runtime: static
+    rootDir: agent-pwa
+    plan: free
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    autoDeploy: true
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /sw.js
+        name: Cache-Control
+        value: no-cache
+    envVars:
+      - key: VITE_AGENT_API_URL
+        value: https://field-sales-api.onrender.com

@@ -1,0 +1,686 @@
+// ============================================================
+// Field Sales System — Prisma schema
+// PostgreSQL — covers all Phase 1–6 modules.
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ------------------------------------------------------------
+// Enums
+// ------------------------------------------------------------
+
+enum RoleName {
+  SUPER_ADMIN
+  ADMIN
+  AGENT
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  PARTIALLY_PAID
+  CANCELLED
+}
+
+enum PaymentType {
+  CASH
+  CREDIT
+  PARTIAL
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  CHEQUE
+  CARD
+  OTHER
+}
+
+enum ReturnReason {
+  DAMAGED
+  WRONG_ITEM
+  EXPIRED
+  CUSTOMER_REQUEST
+  OTHER
+}
+
+enum AttachmentKind {
+  INVOICE_PHOTO
+  STORE_PHOTO
+  DELIVERY_PROOF
+  PAYMENT_RECEIPT
+  VISIT_PHOTO
+  SIGNATURE
+  PRODUCT_IMAGE
+  COMPANY_LOGO
+  OTHER
+}
+
+enum VisitStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  MISSED
+  CANCELLED
+}
+
+enum NotificationKind {
+  ANNOUNCEMENT
+  ALERT_LIMIT_EXCEEDED
+  ALERT_OFFLINE
+  ALERT_LOCATION_STALE
+  TASK_ASSIGNED
+  GENERAL
+}
+
+enum AuditAction {
+  LOGIN
+  LOGOUT
+  LOGIN_FAILED
+  USER_CREATED
+  USER_UPDATED
+  USER_DISABLED
+  PASSWORD_RESET
+  PERMISSIONS_CHANGED
+  INVOICE_CREATED
+  INVOICE_UPDATED
+  INVOICE_CANCELLED
+  INVOICE_DISCOUNT_OVERRIDE
+  RETURN_CREATED
+  PAYMENT_CREATED
+  CUSTOMER_CREATED
+  CUSTOMER_UPDATED
+  PRODUCT_CREATED
+  PRODUCT_UPDATED
+  SETTINGS_UPDATED
+  LIMIT_EXCEEDED_ATTEMPT
+}
+
+// ------------------------------------------------------------
+// RBAC: Role / Permission / User
+// ------------------------------------------------------------
+
+model Role {
+  id          Int              @id @default(autoincrement())
+  name        RoleName         @unique
+  description String?
+  users       User[]
+  permissions RolePermission[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@map("roles")
+}
+
+model Permission {
+  id          Int                  @id @default(autoincrement())
+  code        String               @unique // e.g. "invoice.create"
+  description String?
+  group       String? // e.g. "Invoices", "Customers"
+  roles       RolePermission[]
+  users       UserPermission[]
+  createdAt   DateTime             @default(now())
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       Int
+  permissionId Int
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+/// Per-user override: can grant or revoke a permission regardless of role.
+model UserPermission {
+  userId       String
+  permissionId Int
+  granted      Boolean    @default(true) // false = explicit deny
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([userId, permissionId])
+  @@map("user_permissions")
+}
+
+model User {
+  id                String           @id @default(uuid())
+  username          String           @unique
+  email             String?          @unique
+  fullName          String
+  phone             String?
+  passwordHash      String
+  roleId            Int
+  role              Role             @relation(fields: [roleId], references: [id])
+  branchId          String?
+  branch            Branch?          @relation(fields: [branchId], references: [id])
+  isActive          Boolean          @default(true)
+  failedLoginCount  Int              @default(0)
+  lockedUntil       DateTime?
+  lastLoginAt       DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  permissions       UserPermission[]
+  refreshTokens     RefreshToken[]
+  loginHistory      LoginHistory[]
+  agentLimits       AgentLimits?
+  invoicesCreated   Invoice[]        @relation("InvoiceCreatedBy")
+  customersCreated  Customer[]       @relation("CustomerCreatedBy")
+  paymentsCreated   Payment[]        @relation("PaymentCreatedBy")
+  returnsCreated    Return[]         @relation("ReturnCreatedBy")
+  visitsAssigned    Visit[]          @relation("VisitAgent")
+  visitTasks        VisitTask[]
+  agentLocations    AgentLocation[]
+  notifications     Notification[]   @relation("NotificationTo")
+  auditLogs         AuditLog[]
+
+  @@index([roleId])
+  @@index([branchId])
+  @@map("users")
+}
+
+model RefreshToken {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String   @unique
+  userAgent  String?
+  ip         String?
+  revokedAt  DateTime?
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model LoginHistory {
+  id         String   @id @default(uuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  username   String
+  success    Boolean
+  ip         String?
+  userAgent  String?
+  reason     String?
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("login_history")
+}
+
+/// Per-agent advanced limits enforced at invoice creation time.
+model AgentLimits {
+  userId                  String   @id
+  user                    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  maxDiscountPercent      Decimal? @db.Decimal(5, 2)   // e.g. 10.00 = 10%
+  maxDiscountAmount       Decimal? @db.Decimal(14, 2)
+  maxInvoiceTotal         Decimal? @db.Decimal(14, 2)
+  preventBelowCost        Boolean  @default(true)
+  allowEditAfterPrint     Boolean  @default(false)
+  allowReturns            Boolean  @default(true)
+  updatedAt               DateTime @updatedAt
+
+  @@map("agent_limits")
+}
+
+// ------------------------------------------------------------
+// Branches / Settings
+// ------------------------------------------------------------
+
+model Branch {
+  id          String     @id @default(uuid())
+  name        String
+  code        String     @unique
+  address     String?
+  phone       String?
+  isActive    Boolean    @default(true)
+  invoiceSeq  Int        @default(0) // monotonic per-branch sequence
+  returnSeq   Int        @default(0)
+  paymentSeq  Int        @default(0)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  users       User[]
+  invoices    Invoice[]
+  customers   Customer[]
+
+  @@map("branches")
+}
+
+model Setting {
+  id              Int      @id @default(autoincrement())
+  companyName     String
+  companyNameAr   String?
+  taxNumber       String?
+  phone           String?
+  email           String?
+  address         String?
+  logoPath        String?
+  invoiceFooter   String?
+  invoiceFooterAr String?
+  defaultCurrency String   @default("SAR")
+  defaultLocale   String   @default("ar")
+  updatedAt       DateTime @updatedAt
+
+  @@map("settings")
+}
+
+// ------------------------------------------------------------
+// Catalog: Categories / Products
+// ------------------------------------------------------------
+
+model ProductCategory {
+  id        String    @id @default(uuid())
+  name      String
+  nameAr    String?
+  parentId  String?
+  parent    ProductCategory?  @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children  ProductCategory[] @relation("CategoryHierarchy")
+  products  Product[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@map("product_categories")
+}
+
+model Product {
+  id            String    @id @default(uuid())
+  sku           String    @unique
+  barcode       String?   @unique
+  name          String
+  nameAr        String?
+  description   String?
+  categoryId    String?
+  category      ProductCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  unitType      String    @default("piece") // piece | carton | kg | liter
+  costPrice     Decimal   @db.Decimal(14, 2)
+  sellingPrice  Decimal   @db.Decimal(14, 2)
+  taxPercent    Decimal   @default(0) @db.Decimal(5, 2)
+  stockQty      Decimal   @default(0) @db.Decimal(14, 3)
+  imagePath     String?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  invoiceItems  InvoiceItem[]
+  returnItems   ReturnItem[]
+
+  @@index([categoryId])
+  @@index([isActive])
+  @@map("products")
+}
+
+// ------------------------------------------------------------
+// Customers (stores)
+// ------------------------------------------------------------
+
+model Customer {
+  id           String    @id @default(uuid())
+  code         String    @unique
+  storeName    String
+  contactName  String?
+  phone        String?
+  taxNumber    String?
+  email        String?
+  address      String?
+  city         String?
+  region       String?
+  latitude     Float?
+  longitude    Float?
+  notes        String?
+  branchId     String?
+  branch       Branch?   @relation(fields: [branchId], references: [id])
+  createdById  String?
+  createdBy    User?     @relation("CustomerCreatedBy", fields: [createdById], references: [id])
+  isActive     Boolean   @default(true)
+
+  /// running ledger balance — positive = customer owes us
+  balance      Decimal   @default(0) @db.Decimal(14, 2)
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  invoices     Invoice[]
+  payments     Payment[]
+  returns      Return[]
+  balanceHistory CustomerBalanceHistory[]
+  visits       Visit[]
+  visitTasks   VisitTask[]
+
+  @@index([branchId])
+  @@index([createdById])
+  @@map("customers")
+}
+
+model CustomerBalanceHistory {
+  id          String    @id @default(uuid())
+  customerId  String
+  customer    Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  delta       Decimal   @db.Decimal(14, 2) // +debit / -credit
+  balanceAfter Decimal  @db.Decimal(14, 2)
+  reason      String    // e.g. "INVOICE", "PAYMENT", "RETURN", "ADJUSTMENT"
+  refType     String?   // "invoice" | "payment" | "return"
+  refId       String?
+  createdAt   DateTime  @default(now())
+
+  @@index([customerId, createdAt])
+  @@map("customer_balance_history")
+}
+
+// ------------------------------------------------------------
+// Invoices
+// ------------------------------------------------------------
+
+model Invoice {
+  id              String        @id @default(uuid())
+  invoiceNumber   String        @unique // human-readable, e.g. "BR1-000123"
+  branchId        String
+  branch          Branch        @relation(fields: [branchId], references: [id])
+  customerId      String
+  customer        Customer      @relation(fields: [customerId], references: [id])
+  createdById     String
+  createdBy       User          @relation("InvoiceCreatedBy", fields: [createdById], references: [id])
+  status          InvoiceStatus @default(ISSUED)
+  paymentType     PaymentType   @default(CASH)
+  issuedAt        DateTime      @default(now())
+  dueDate         DateTime?
+
+  /// snapshot of customer at invoice time (for printing)
+  customerSnapshot Json?
+
+  subtotal        Decimal       @db.Decimal(14, 2)
+  discountAmount  Decimal       @default(0) @db.Decimal(14, 2)
+  discountPercent Decimal       @default(0) @db.Decimal(5, 2)
+  taxAmount       Decimal       @default(0) @db.Decimal(14, 2)
+  totalAmount     Decimal       @db.Decimal(14, 2)
+  paidAmount      Decimal       @default(0) @db.Decimal(14, 2)
+
+  notes           String?
+  printedAt       DateTime?
+  cancelledAt     DateTime?
+  cancelReason    String?
+
+  /// agent's GPS at moment of creation (optional)
+  createLat       Float?
+  createLng       Float?
+
+  /// link to offline temp ID if synced from PWA
+  clientUuid      String?       @unique
+
+  signaturePath   String?
+
+  items           InvoiceItem[]
+  payments        Payment[]
+  returns         Return[]
+  attachments     Attachment[]
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([branchId, issuedAt])
+  @@index([customerId])
+  @@index([createdById])
+  @@index([status])
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id            String   @id @default(uuid())
+  invoiceId     String
+  invoice       Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id])
+  /// snapshot to keep historical accuracy
+  productName   String
+  productSku    String
+  unitType      String
+  costPriceSnap Decimal  @db.Decimal(14, 2)
+  unitPrice     Decimal  @db.Decimal(14, 2)
+  quantity      Decimal  @db.Decimal(14, 3)
+  taxPercent    Decimal  @default(0) @db.Decimal(5, 2)
+  discount      Decimal  @default(0) @db.Decimal(14, 2)
+  lineTotal     Decimal  @db.Decimal(14, 2)
+
+  @@index([invoiceId])
+  @@index([productId])
+  @@map("invoice_items")
+}
+
+// ------------------------------------------------------------
+// Returns
+// ------------------------------------------------------------
+
+model Return {
+  id            String       @id @default(uuid())
+  returnNumber  String       @unique
+  invoiceId     String
+  invoice       Invoice      @relation(fields: [invoiceId], references: [id])
+  customerId    String
+  customer      Customer     @relation(fields: [customerId], references: [id])
+  createdById   String
+  createdBy     User         @relation("ReturnCreatedBy", fields: [createdById], references: [id])
+  reason        ReturnReason @default(OTHER)
+  reasonNote    String?
+  totalAmount   Decimal      @db.Decimal(14, 2)
+  isFullReturn  Boolean      @default(false)
+  createdAt     DateTime     @default(now())
+
+  items         ReturnItem[]
+  attachments   Attachment[]
+
+  @@index([invoiceId])
+  @@index([customerId])
+  @@map("returns")
+}
+
+model ReturnItem {
+  id            String   @id @default(uuid())
+  returnId      String
+  return        Return   @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id])
+  productName   String
+  productSku    String
+  unitPrice     Decimal  @db.Decimal(14, 2)
+  quantity      Decimal  @db.Decimal(14, 3)
+  lineTotal     Decimal  @db.Decimal(14, 2)
+
+  @@index([returnId])
+  @@map("return_items")
+}
+
+// ------------------------------------------------------------
+// Payments / Collections
+// ------------------------------------------------------------
+
+model Payment {
+  id            String        @id @default(uuid())
+  receiptNumber String        @unique
+  customerId    String
+  customer      Customer      @relation(fields: [customerId], references: [id])
+  invoiceId     String?
+  invoice       Invoice?      @relation(fields: [invoiceId], references: [id])
+  createdById   String
+  createdBy     User          @relation("PaymentCreatedBy", fields: [createdById], references: [id])
+  method        PaymentMethod @default(CASH)
+  amount        Decimal       @db.Decimal(14, 2)
+  paidAt        DateTime      @default(now())
+  notes         String?
+  createLat     Float?
+  createLng     Float?
+  attachments   Attachment[]
+  createdAt     DateTime      @default(now())
+
+  @@index([customerId, paidAt])
+  @@index([invoiceId])
+  @@map("payments")
+}
+
+// ------------------------------------------------------------
+// Visits
+// ------------------------------------------------------------
+
+model VisitTask {
+  id           String     @id @default(uuid())
+  customerId   String
+  customer     Customer   @relation(fields: [customerId], references: [id])
+  agentId      String
+  agent        User       @relation(fields: [agentId], references: [id])
+  scheduledAt  DateTime
+  notes        String?
+  status       VisitStatus @default(PLANNED)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  visit        Visit?
+
+  @@index([agentId, scheduledAt])
+  @@index([customerId])
+  @@map("visit_tasks")
+}
+
+model Visit {
+  id            String     @id @default(uuid())
+  taskId        String?    @unique
+  task          VisitTask? @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  customerId    String
+  customer      Customer   @relation(fields: [customerId], references: [id])
+  agentId       String
+  agent         User       @relation("VisitAgent", fields: [agentId], references: [id])
+  status        VisitStatus @default(IN_PROGRESS)
+  checkInAt     DateTime?
+  checkInLat    Float?
+  checkInLng    Float?
+  checkInRadiusMeters Int?  // distance from customer at check-in
+  checkOutAt    DateTime?
+  checkOutLat   Float?
+  checkOutLng   Float?
+  notes         String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  attachments   Attachment[]
+  photos        VisitPhoto[]
+
+  @@index([agentId, checkInAt])
+  @@index([customerId])
+  @@map("visits")
+}
+
+model VisitPhoto {
+  id        String   @id @default(uuid())
+  visitId   String
+  visit     Visit    @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  filePath  String
+  caption   String?
+  createdAt DateTime @default(now())
+
+  @@index([visitId])
+  @@map("visit_photos")
+}
+
+// ------------------------------------------------------------
+// Attachments (polymorphic)
+// ------------------------------------------------------------
+
+model Attachment {
+  id           String         @id @default(uuid())
+  kind         AttachmentKind
+  filePath     String
+  originalName String
+  mimeType     String
+  sizeBytes    Int
+
+  invoiceId    String?
+  invoice      Invoice?       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  returnId     String?
+  return       Return?        @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  paymentId    String?
+  payment      Payment?       @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  visitId      String?
+  visit        Visit?         @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  uploadedById String?
+  createdAt    DateTime       @default(now())
+
+  @@index([invoiceId])
+  @@index([returnId])
+  @@index([paymentId])
+  @@index([visitId])
+  @@map("attachments")
+}
+
+// ------------------------------------------------------------
+// GPS tracking
+// ------------------------------------------------------------
+
+model AgentLocation {
+  id         BigInt   @id @default(autoincrement())
+  agentId    String
+  agent      User     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  latitude   Float
+  longitude  Float
+  accuracy   Float?
+  speed      Float?
+  heading    Float?
+  battery    Float?
+  recordedAt DateTime @default(now())
+
+  @@index([agentId, recordedAt])
+  @@map("agent_locations")
+}
+
+// ------------------------------------------------------------
+// Notifications
+// ------------------------------------------------------------
+
+model Notification {
+  id         String           @id @default(uuid())
+  toUserId   String?
+  toUser     User?            @relation("NotificationTo", fields: [toUserId], references: [id], onDelete: Cascade)
+  kind       NotificationKind
+  title      String
+  body       String?
+  payload    Json?
+  readAt     DateTime?
+  createdAt  DateTime         @default(now())
+
+  @@index([toUserId, readAt])
+  @@map("notifications")
+}
+
+// ------------------------------------------------------------
+// Audit log
+// ------------------------------------------------------------
+
+model AuditLog {
+  id         BigInt      @id @default(autoincrement())
+  userId     String?
+  user       User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action     AuditAction
+  entityType String?
+  entityId   String?
+  ip         String?
+  userAgent  String?
+  metadata   Json?
+  createdAt  DateTime    @default(now())
+
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}
