@@ -1,0 +1,5 @@
+# Force LF line endings for shell scripts and Dockerfiles
+# (Windows checkouts otherwise get CRLF which breaks #!/bin/sh)
+*.sh        text eol=lf
+Dockerfile  text eol=lf
+*.dockerfile text eol=lf
