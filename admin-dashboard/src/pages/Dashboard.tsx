@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import {
   ReceiptText, Wallet, Undo2, Users as UsersIcon, AlertTriangle, TrendingUp, ArrowUpRight, Sparkles,
+  type LucideIcon,
 } from 'lucide-react';
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -244,7 +245,7 @@ export function Dashboard() {
 }
 
 function Kpi({ tone, icon: Icon, label, value }: {
-  tone: 'indigo'|'emerald'|'amber'|'rose'; icon: React.ComponentType<{size?: number; strokeWidth?: number}>; label: string; value: string;
+  tone: 'indigo'|'emerald'|'amber'|'rose'; icon: LucideIcon; label: string; value: string;
 }) {
   const tones = {
     indigo:  { bg: 'from-indigo-500 to-indigo-700', iconBg: 'bg-indigo-50', iconText: 'text-indigo-600' },
