@@ -36,14 +36,11 @@ COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
+COPY start.sh ./start.sh
 
-RUN mkdir -p /app/uploads && chown -R node:node /app/uploads
+RUN mkdir -p /app/uploads && chmod +x ./start.sh && chown -R node:node /app/uploads ./start.sh
 USER node
 
 EXPOSE 3000
 ENTRYPOINT ["/usr/bin/tini", "--"]
-# Use db push (not migrate deploy) since the schema is the source of truth and
-# the DB may already exist (when redeploying or using shared Neon DB).
-# `--accept-data-loss` is safe here: it only fires when removing/altering
-# columns; for additive changes it's a no-op.
-CMD ["sh", "-c", "npx prisma db push --skip-generate --accept-data-loss && node dist/main.js"]
+CMD ["./start.sh"]
