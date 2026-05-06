@@ -3,12 +3,13 @@ import { useTranslation } from 'react-i18next';
 import {
   LayoutDashboard, Users, Shield, Map, Store, Package, ReceiptText,
   Undo2, Wallet, ClipboardList, BarChart3, Settings as SettingsIcon, ScrollText,
+  type LucideIcon,
 } from 'lucide-react';
 
 interface NavEntry {
   to: string;
   label: keyof typeof labels;
-  icon: React.ComponentType<{ size?: number; className?: string; strokeWidth?: number }>;
+  icon: LucideIcon;
 }
 type Group = { heading: keyof typeof labels | null; items: NavEntry[] };
 
