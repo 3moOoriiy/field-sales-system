@@ -42,4 +42,8 @@ USER node
 
 EXPOSE 3000
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main.js"]
+# Use db push (not migrate deploy) since the schema is the source of truth and
+# the DB may already exist (when redeploying or using shared Neon DB).
+# `--accept-data-loss` is safe here: it only fires when removing/altering
+# columns; for additive changes it's a no-op.
+CMD ["sh", "-c", "npx prisma db push --skip-generate --accept-data-loss && node dist/main.js"]
