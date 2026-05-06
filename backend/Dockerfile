@@ -36,7 +36,6 @@ COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/src/print/templates ./dist/print/templates
 
 RUN mkdir -p /app/uploads && chown -R node:node /app/uploads
 USER node
