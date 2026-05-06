@@ -1,11 +1,28 @@
+// Aggressive early logging — these run BEFORE Nest imports load,
+// so we can see exactly which step fails on cold-start in production.
+const stage = (label: string) => process.stderr.write(`[boot] ${label}\n`);
+stage('main.ts entered');
+
+process.on('uncaughtException', (err) => {
+  process.stderr.write(`[boot] uncaughtException: ${err.stack ?? err}\n`);
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  process.stderr.write(`[boot] unhandledRejection: ${(reason as Error)?.stack ?? reason}\n`);
+  process.exit(1);
+});
+
 import { NestFactory } from '@nestjs/core';
+stage('@nestjs/core loaded');
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 import helmet from 'helmet';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
+stage('http middleware loaded');
 import { AppModule } from './app.module';
+stage('AppModule loaded');
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
 // Make BigInt JSON-serialisable (used by agent_locations.id and audit_logs.id)
@@ -15,7 +32,9 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 };
 
 async function bootstrap() {
+  stage('bootstrap() entered');
   const app = await NestFactory.create(AppModule, { bufferLogs: false });
+  stage('NestFactory.create resolved');
   const logger = new Logger('Bootstrap');
 
   app.setGlobalPrefix('api', { exclude: ['health'] });
@@ -57,13 +76,14 @@ async function bootstrap() {
   });
 
   const port = Number(process.env.PORT ?? 3000);
+  stage(`about to listen on :${port}`);
   await app.listen(port, '0.0.0.0');
+  stage('app.listen resolved');
   logger.log(`Backend listening on http://0.0.0.0:${port}`);
   logger.log(`Swagger docs at http://0.0.0.0:${port}/api/docs`);
 }
 
 bootstrap().catch((err) => {
-  // eslint-disable-next-line no-console
-  console.error('Fatal bootstrap error', err);
+  process.stderr.write(`[boot] FATAL bootstrap error: ${(err as Error)?.stack ?? err}\n`);
   process.exit(1);
 });
